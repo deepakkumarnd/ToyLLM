@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-torch.set_printoptions(sci_mode=False)
+
 class LayerNormalization(nn.Module):
     def __init__(self, emb_dim):
         super().__init__()
@@ -16,17 +16,17 @@ class LayerNormalization(nn.Module):
         return self.scale * x_norm + self.shift
 
 
-emb_dim = 5
-sample_input = torch.randn(2, emb_dim)
-sample_network = nn.Sequential(nn.Linear(emb_dim, 6), nn.ReLU())
-ln = LayerNormalization(6)
-out = sample_network(sample_input)
-print("Output layer before layer normalisation")
-print(out)
-print("Mean=", out.mean(dim=-1, keepdim=True))
-print("variance=", out.var(dim=-1, keepdim=True))
-print("Output layer after layer normalisation")
-out = ln(out)
-print(out)
-print("Mean=", out.mean(dim=-1, keepdim=True))
-print("variance=", out.var(dim=-1, keepdim=True))
+# emb_dim = 5
+# sample_input = torch.randn(2, emb_dim)
+# sample_network = nn.Sequential(nn.Linear(emb_dim, 6), nn.ReLU())
+# ln = LayerNormalization(6)
+# out = sample_network(sample_input)
+# print("Output layer before layer normalisation")
+# print(out)
+# print("Mean=", out.mean(dim=-1, keepdim=True))
+# print("variance=", out.var(dim=-1, keepdim=True))
+# print("Output layer after layer normalisation")
+# out = ln(out)
+# print(out)
+# print("Mean=", out.mean(dim=-1, keepdim=True))
+# print("variance=", out.var(dim=-1, keepdim=True))
