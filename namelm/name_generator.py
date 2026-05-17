@@ -23,6 +23,7 @@ def _latest_checkpoint() -> Path:
     checkpoints = sorted(_MODELS_DIR.glob("name-*.pt"))
     if not checkpoints:
         raise FileNotFoundError(f"No checkpoints found in {_MODELS_DIR}")
+    print(f"Using latest checkpoint: {checkpoints[-1].name}")
     return checkpoints[-1]
 
 
@@ -42,6 +43,61 @@ def _sample_next(logits: torch.Tensor, temperature: float, top_k: int) -> int:
     return torch.multinomial(probs, num_samples=1).item()
 
 
+def _build_prefix_mask(tok, partial: str) -> set[int]:
+    """Return token IDs whose text starts with `partial` (word-initial tokens only)."""
+    return {
+        tid
+        for token, tid in tok.get_vocab().items()
+        if not token.startswith("##") and token.startswith(partial)
+    }
+
+
+def _parse_pattern(pattern: str) -> tuple[str, str]:
+    """Split pattern into (complete_words_text, partial_last_word).
+
+    'Rahu'      -> ('',       'rahu')
+    'Rahul S'   -> ('rahul',  's')
+    'Rahul '    -> ('rahul',  '')   # trailing space = last word is complete
+    """
+    lower = pattern.lower()
+    if lower.endswith(" "):
+        return lower.strip(), ""
+    parts = lower.split()
+    if len(parts) <= 1:
+        return "", parts[0] if parts else ""
+    return " ".join(parts[:-1]), parts[-1]
+
+
+def _generate_one(model, tok, pattern, sep_id, config, device, temperature, top_k) -> str:
+    complete_text, partial = _parse_pattern(pattern)
+
+    # Tokenize the fully completed words as the starting context.
+    context = tok.encode(complete_text).ids if complete_text else []
+
+    # Build constraint mask for the first generated token.
+    constrained_ids = _build_prefix_mask(tok, partial) if partial else set()
+
+    for _ in range(config.context_length * 3):
+        input_ids = torch.tensor([context[-config.context_length:] or [0]], device=device)
+        with torch.no_grad():
+            logits = model(input_ids)[0, -1].clone()
+
+        # Apply prefix constraint on the very first new token.
+        if constrained_ids:
+            mask = torch.full_like(logits, float("-inf"))
+            for tid in constrained_ids:
+                mask[tid] = logits[tid]
+            logits = mask
+            constrained_ids = set()   # constraint used — free-generate from here
+
+        next_id = _sample_next(logits, temperature, top_k)
+        if next_id == sep_id:
+            break
+        context.append(next_id)
+
+    return tok.decode(context)
+
+
 def cmd_generate(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = LLMConfig()
@@ -51,22 +107,15 @@ def cmd_generate(args):
     model = _load_model(checkpoint, config, device)
 
     sep_id = tok.token_to_id("[SEP]")
-    pattern_ids = tok.encode(args.pattern.lower()).ids
 
-    print(f"Generating names starting with '{args.pattern}':\n")
+    _, partial = _parse_pattern(args.pattern)
+    matches = _build_prefix_mask(tok, partial) if partial else {"(any)"}
+    print(f"Generating names matching '{args.pattern}' "
+          f"({len(matches)} vocab token(s) satisfy the prefix):\n")
 
     for i in range(args.count):
-        context = pattern_ids[:]
-        for _ in range(config.context_length * 3):
-            input_ids = torch.tensor([context[-config.context_length:]], device=device)
-            with torch.no_grad():
-                logits = model(input_ids)
-            next_id = _sample_next(logits[0, -1], args.temperature, args.top_k)
-            if next_id == sep_id:
-                break
-            context.append(next_id)
-
-        name = tok.decode(context)
+        name = _generate_one(model, tok, args.pattern, sep_id, config, device,
+                             args.temperature, args.top_k)
         print(f"  {i + 1}. {name.title()}")
 
 
