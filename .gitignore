@@ -174,3 +174,8 @@ cython_debug/
 .pypirc
 
 .idea/*
+# Trained model weights and plots
+models/
+
+# Generated tokenizer JSON files
+hf/*.json
